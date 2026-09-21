@@ -1,10 +1,14 @@
 """Browser engine wrapper.
 
 Strategy (per decision: "borrow AIHawk's anti-detect engine"):
-  1. If `invisible_playwright` (AIHawk) is installed, use it — far lower ban risk.
-  2. Otherwise, fall back to plain Playwright (Chromium).
+  1. Default (`auto`): prefer the AIHawk anti-detect engine (invisible-playwright),
+     fall back to plain Playwright Chromium if it is not installed.
+  2. `aihawk`: require the AIHawk engine.
+  3. `playwright`: plain Playwright Chromium.
 
-Both expose the same interface, so the apply engine doesn't care which is active.
+The AIHawk engine is a context manager returning a patched Firefox browser
+(lower ban risk). We keep the context manager alive for the wrapper's lifetime
+and create pages via `browser.new_page()`.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ class BrowserOptions:
     record_dir: Path | None = None
     user_agent: str | None = None
     proxy: str | None = None
+    seed: int | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -31,52 +36,77 @@ class Browser:
     def __init__(self, options: BrowserOptions | None = None) -> None:
         self.options = options or BrowserOptions()
         self.settings = get_settings()
-        self._playwright = None
-        self._browser = None
-        self._context = None
+        self._playwright = None          # plain Playwright manager
+        self._browser = None             # AIHawk browser OR Playwright browser
+        self._context = None             # Playwright context (fallback path)
         self._page = None
-        self._aihawk = False
+        self._aihawk = None              # the InvisiblePlaywright context manager
 
     # -- lifecycle ----------------------------------------------------------
 
     def launch(self) -> "Browser":
-        headed = (
-            self.options.headed
-            if self.options.headed is not None
-            else self.settings.headed
+        engine = self.settings.browser_engine.lower()
+        use_aihawk = self._resolve_engine(engine)
+
+        if use_aihawk:
+            self._launch_aihawk()
+        else:
+            self._launch_playwright()
+        return self
+
+    def _resolve_engine(self, engine: str) -> bool:
+        """Decide which engine to use based on config + availability."""
+        if engine == "playwright":
+            return False
+        try:
+            import invisible_playwright  # noqa: F401
+
+            available = True
+        except ImportError:
+            available = False
+
+        if engine == "aihawk" and not available:
+            raise RuntimeError(
+                "BROWSER_ENGINE=aihawk but invisible-playwright is not installed. "
+                "Run: pip install invisible-playwright"
+            )
+        return available  # "auto" -> prefer AIHawk if present
+
+    def _launch_aihawk(self) -> None:
+        from invisible_playwright import InvisiblePlaywright
+
+        headed = self.options.headed if self.options.headed is not None else self.settings.headed
+        proxy = self.options.proxy
+        proxy_dict = None
+        if proxy:
+            # AIHawk accepts a dict, e.g. {"server": "socks5://host:port"}.
+            proxy_dict = {"server": proxy}
+
+        self._aihawk = InvisiblePlaywright(
+            headless=not headed,
+            proxy=proxy_dict,
+            seed=self.options.seed,
+            **self.options.extra,
         )
+        self._browser = self._aihawk.__enter__()
+        self._page = self._get_page_from(self._browser)
+
+    def _launch_playwright(self) -> None:
+        from playwright.sync_api import sync_playwright
+
+        headed = self.options.headed if self.options.headed is not None else self.settings.headed
         record_dir = self.options.record_dir or self.settings.recordings
         record_dir = Path(record_dir)
         record_dir.mkdir(parents=True, exist_ok=True)
 
-        # Prefer the AIHawk anti-detect engine if available.
-        try:
-            import invisible_playwright  # noqa: F401
-
-            self._aihawk = True
-        except ImportError:
-            self._aihawk = False
-
-        if self._aihawk:
-            # AIHawk mirrors Playwright's API.
-            self._browser = invisible_playwright.launch(
-                headless=not headed,
-                proxy=self.options.proxy,
-                **self.options.extra,
-            )
-            self._page = self._get_page_from(self._browser)
-        else:
-            from playwright.sync_api import sync_playwright
-
-            self._playwright = sync_playwright().start()
-            self._browser = self._playwright.chromium.launch(headless=not headed)
-            self._context = self._browser.new_context(
-                record_video_dir=str(record_dir),
-                record_video_size={"width": 1280, "height": 720},
-                user_agent=self.options.user_agent,
-            )
-            self._page = self._context.new_page()
-        return self
+        self._playwright = sync_playwright().start()
+        self._browser = self._playwright.chromium.launch(headless=not headed)
+        self._context = self._browser.new_context(
+            record_video_dir=str(record_dir),
+            record_video_size={"width": 1280, "height": 720},
+            user_agent=self.options.user_agent,
+        )
+        self._page = self._context.new_page()
 
     def _get_page_from(self, obj: Any) -> Any:
         """Return a page from an AIHawk browser/context/page object."""
@@ -99,11 +129,15 @@ class Browser:
 
     def close(self) -> None:
         try:
-            if self._context is not None and hasattr(self._context, "close"):
-                self._context.close()
+            if self._aihawk is not None:
+                self._aihawk.__exit__(None, None, None)
         finally:
-            if self._playwright is not None and hasattr(self._playwright, "stop"):
-                self._playwright.stop()
+            try:
+                if self._context is not None and hasattr(self._context, "close"):
+                    self._context.close()
+            finally:
+                if self._playwright is not None and hasattr(self._playwright, "stop"):
+                    self._playwright.stop()
 
     # -- primitives ---------------------------------------------------------
 
@@ -121,53 +155,3 @@ class Browser:
 
     def screenshot(self, path: Path) -> None:
         self.page.screenshot(path=str(path))
-
-    def scrape_job_cards(self, url: str, board: str, limit: int = 20) -> list[dict]:
-        """Generic job-card scraper: navigates and extracts card data.
-
-        Board-specific selectors are provided inline; this can be extended with
-        dedicated adapter modules per board as needed.
-        """
-        self.goto(url)
-        try:
-            self.page.wait_for_load_state("networkidle")
-        except Exception:
-            pass
-
-        selectors = {
-            "indeed": "div.job_seen_beacon",
-            "linkedin": "li.jobs-search-results__list-item",
-        }
-        sel = selectors.get(board)
-        if sel is None:
-            return []
-
-        cards = self.page.locator(sel).all()[:limit]
-        out: list[dict] = []
-        for card in cards:
-            try:
-                text = card.inner_text()
-            except Exception:
-                continue
-            # Extract likely title/company by line heuristics.
-            lines = [l.strip() for l in text.splitlines() if l.strip()]
-            title = lines[0] if lines else ""
-            company = lines[1] if len(lines) > 1 else ""
-            href = ""
-            try:
-                href = card.locator("a").first.get_attribute("href") or ""
-            except Exception:
-                pass
-            out.append(
-                {
-                    "title": title,
-                    "company": company,
-                    "location": "",
-                    "url": href,
-                    "apply_url": href,
-                    "description": text,
-                    "easy_apply": "easy apply" in text.lower(),
-                    "external_ats": False,
-                }
-            )
-        return out

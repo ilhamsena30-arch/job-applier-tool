@@ -43,6 +43,25 @@ def cmd_apply(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_search(args: argparse.Namespace) -> int:
+    """Search job boards and print normalized results."""
+    from agent.browser.engine import Browser, BrowserOptions
+    from agent.search.registry import search_all
+
+    browser = Browser(BrowserOptions(headed=args.headed)).launch()
+    try:
+        jobs = search_all(browser, args.query, args.location, limit_per_board=args.limit)
+    finally:
+        browser.close()
+
+    for j in jobs:
+        flag = "EASY" if j.easy_apply else "ATS "
+        print(f"[{flag}] {j.company} — {j.title} ({j.location})")
+        print(f"       {j.url}")
+    print(f"\n{len(jobs)} job(s) found.")
+    return 0
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     """Run the reply-processing loop (poll inbox, handle 4c replies)."""
     resume = load_resume()
@@ -78,6 +97,13 @@ def main() -> int:
     p_apply.add_argument("--description")
     p_apply.add_argument("--easy-apply", action="store_true")
     p_apply.set_defaults(func=cmd_apply)
+
+    p_search = sub.add_parser("search", help="Search job boards for matching jobs")
+    p_search.add_argument("query")
+    p_search.add_argument("--location", default="")
+    p_search.add_argument("--limit", type=int, default=10)
+    p_search.add_argument("--headed", action="store_true")
+    p_search.set_defaults(func=cmd_search)
 
     p_run = sub.add_parser("run", help="Poll inbox and process replies")
     p_run.add_argument("--interval", type=int, default=60)
