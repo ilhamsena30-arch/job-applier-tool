@@ -14,8 +14,9 @@ openai>=1.54
 
 # ---- Browser automation ----
 # Base Playwright (always installed). The AIHawk anti-detect engine
-# `invisible-playwright` is optional and auto-detected at runtime.
+# `invisible-playwright` is the default engine (BROWSER_ENGINE=auto).
 playwright>=1.48
+invisible-playwright>=0.25.0
 
 # ---- Resume parsing / PDF ----
 pymupdf>=1.24

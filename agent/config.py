@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     confidence_threshold: float = 75.0
     daily_rate_limit: int = 10
     headed: bool = True
+    # Browser engine: "auto" (prefer AIHawk anti-detect, fallback to Playwright),
+    # "aihawk" (require it), or "playwright" (plain Chromium).
+    browser_engine: str = "auto"
 
     # ---- Convenience helpers ----
     @property

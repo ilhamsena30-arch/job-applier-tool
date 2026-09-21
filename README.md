@@ -38,6 +38,7 @@
 
 ```bash
 python -m agent extract                      # resume.pdf -> resume.json
+python -m agent search "python developer" --location remote   # search boards
 python -m agent apply "https://..." --title "SWE" --company "Acme"   # one-off apply
 python -m agent run                          # poll inbox, handle your replies
 uvicorn agent.dashboard:app --reload         # web dashboard (status + recordings)
@@ -45,10 +46,11 @@ uvicorn agent.dashboard:app --reload         # web dashboard (status + recording
 
 ## Decisions & safety
 
-- **Build vs borrow:** uses AIHawk's anti-detect engine when installed; falls back to Playwright.
+- **Build vs borrow:** uses AIHawk's anti-detect engine (`invisible-playwright`, patched Firefox) as the default browser; falls back to plain Playwright Chromium if not installed. Configurable via `BROWSER_ENGINE=auto|aihawk|playwright`.
 - **MCP:** raw Playwright (same engine), per project decision.
 - **LinkedIn:** dedicated low-value account, conservative pacing; Easy Apply is notify-only.
 - **Model:** `deepseek-flash` (vision-capable) for extraction/form-reading; `deepseek-v4-pro` for hard reasoning (no vision).
+- **Search:** dedicated adapters for LinkedIn and Indeed with warm-up + security-check retry (Indeed serves a bot wall on cold direct searches).
 
 ## Project layout
 
@@ -59,9 +61,9 @@ agent/
   llm.py          # DeepSeek client (OpenAI-compatible)
   resume/         # PDF -> JSON extraction
   matching/       # scoring + threshold
-  search/         # board adapters
+  search/         # board adapters (LinkedIn, Indeed) + registry
   apply/          # form filler
-  browser/        # anti-detect / Playwright engine
+  browser/        # AIHawk anti-detect / Playwright engine
   email/          # SMTP sender + IMAP receiver
   tracker/        # Google Sheets
   pdf/            # tailored resume PDF
