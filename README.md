@@ -41,8 +41,20 @@ python -m agent extract                      # resume.pdf -> resume.json
 python -m agent search "python developer" --location remote   # search boards
 python -m agent apply "https://..." --title "SWE" --company "Acme"   # one-off apply
 python -m agent run                          # poll inbox, handle your replies
-uvicorn agent.dashboard:app --reload         # web dashboard (status + recordings)
+python -m agent dashboard --port 8000        # web dashboard (live video + status)
 ```
+
+Then open http://127.0.0.1:8000 — the **live browser stream** shows whatever the
+agent is doing in real time. Click **Start demo browser** to preview the stream
+without running an application. The stream is MJPEG (`multipart/x-mixed-replace`),
+so it works in a plain `<img>` tag with no client library.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /` | Dashboard: live video, application table, recordings, apply form |
+| `GET /stream` | MJPEG live video of the active browser (add `?fps=5` to tune) |
+| `GET /demo/start` \| `/demo/stop` | Launch / stop a preview browser for the stream |
+| `POST /apply` | Apply to a URL (the stream follows the real application) |
 
 ## Decisions & safety
 
@@ -51,6 +63,7 @@ uvicorn agent.dashboard:app --reload         # web dashboard (status + recording
 - **LinkedIn:** dedicated low-value account, conservative pacing; Easy Apply is notify-only.
 - **Model:** `deepseek-flash` (vision-capable) for extraction/form-reading; `deepseek-v4-pro` for hard reasoning (no vision).
 - **Search:** dedicated adapters for LinkedIn and Indeed with warm-up + security-check retry (Indeed serves a bot wall on cold direct searches).
+- **Live view:** the dashboard streams the browser over MJPEG at ~3fps; the orchestrator registers its browser so every real application is watchable live. Recordings are still saved for replay.
 
 ## Project layout
 
@@ -68,6 +81,7 @@ agent/
   tracker/        # Google Sheets
   pdf/            # tailored resume PDF
   store.py        # JSON application store
+  livestream.py   # live MJPEG frame source + active-browser registry
   orchestrator.py # main loop
   cli.py, dashboard.py
 skills/resume-updater/SKILL.md   # VS Code agent skill

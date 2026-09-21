@@ -142,4 +142,4 @@ def _ts(dt: datetime | None) -> str:
 
 
 # Keep ApplicationStatus imported for type checks elsewhere.
-__all__ = ["Tracker", "ApplicationStatus"]
+__all__ = ["ApplicationStatus", "Tracker"]

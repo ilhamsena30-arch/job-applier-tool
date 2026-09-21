@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import smtplib
 import ssl
+from collections.abc import Iterable
 from email.message import EmailMessage
 from pathlib import Path
-from typing import Iterable
 
 from agent.config import get_settings
 

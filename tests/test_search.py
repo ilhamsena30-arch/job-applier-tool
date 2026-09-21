@@ -1,6 +1,6 @@
 """Tests for search adapters (no live network — selector/parse unit tests)."""
 
-from agent.models import Job, JobSource
+from agent.models import JobSource
 from agent.search.indeed import IndeedSearch
 from agent.search.linkedin import LinkedInSearch
 
