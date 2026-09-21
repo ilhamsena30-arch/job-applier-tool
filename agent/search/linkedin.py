@@ -11,7 +11,6 @@ orchestrator's notify-only policy).
 from __future__ import annotations
 
 import hashlib
-import time
 
 from agent.browser.engine import Browser
 from agent.models import Job, JobSource

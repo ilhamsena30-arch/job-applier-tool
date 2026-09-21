@@ -5,12 +5,10 @@ from __future__ import annotations
 import argparse
 import time
 
-from agent.config import get_settings
 from agent.email.receiver import EmailReceiver
 from agent.models import Job, JobSource
 from agent.orchestrator import Orchestrator
 from agent.resume.extract import extract_resume, load_resume
-from agent.store import AppStore
 
 
 def cmd_extract(args: argparse.Namespace) -> int:
@@ -64,9 +62,7 @@ def cmd_search(args: argparse.Namespace) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Run the reply-processing loop (poll inbox, handle 4c replies)."""
-    resume = load_resume()
     orch = Orchestrator()
-    store = AppStore()
     receiver = EmailReceiver()
 
     def handler(reply):
@@ -80,6 +76,14 @@ def cmd_run(args: argparse.Namespace) -> int:
             time.sleep(args.interval)
     except KeyboardInterrupt:
         print("Stopped.")
+    return 0
+
+
+def cmd_dashboard(args: argparse.Namespace) -> int:
+    """Run the web dashboard (live video stream + status)."""
+    import uvicorn
+
+    uvicorn.run("agent.dashboard:app", host=args.host, port=args.port, reload=False)
     return 0
 
 
@@ -108,6 +112,12 @@ def main() -> int:
     p_run = sub.add_parser("run", help="Poll inbox and process replies")
     p_run.add_argument("--interval", type=int, default=60)
     p_run.set_defaults(func=cmd_run)
+
+    p_dash = sub.add_parser("dashboard", help="Run the web dashboard with live video stream")
+    p_dash.add_argument("--host", default="127.0.0.1")
+    p_dash.add_argument("--port", type=int, default=8000)
+    p_dash.add_argument("--fps", type=float, default=3.0)
+    p_dash.set_defaults(func=cmd_dashboard)
 
     args = parser.parse_args()
     return args.func(args)

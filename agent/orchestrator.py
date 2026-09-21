@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -18,8 +19,6 @@ from agent.models import (
     Application,
     ApplicationStatus,
     Job,
-    JobSource,
-    MatchResult,
     Resume,
     utcnow,
 )
@@ -46,6 +45,10 @@ class Orchestrator:
             self.browser = Browser(
                 BrowserOptions(record_dir=Path(self.settings.recordings_dir))
             ).launch()
+            # Expose the live browser to the dashboard's video stream.
+            from agent import livestream
+
+            livestream.set_active_browser(self.browser)
         return self.browser
 
     # ------------------------------------------------------------------ flow
@@ -123,10 +126,8 @@ class Orchestrator:
             except Exception:
                 continue
 
-        try:
+        with contextlib.suppress(Exception):
             browser.page.wait_for_load_state("domcontentloaded")
-        except Exception:
-            pass
         text = browser.content().lower()
         return any(
             marker in text
@@ -190,12 +191,13 @@ class Orchestrator:
         job = app.job
         match = app.match
         missing = ", ".join(match.missing_skills) if match else ""
+        score = match.score if match else "?"
         self.sender.send(
-            subject=f"⏳ Pending: {job.title} @ {job.company} (score {match.score if match else '?'}/100)",
+            subject=f"⏳ Pending: {job.title} @ {job.company} (score {score}/100)",
             body=(
                 f"Confidence too low to auto-apply.\n\n"
                 f"Job: {job.title}\nCompany: {job.company}\n"
-                f"Score: {match.score if match else '?'}/100\n"
+                f"Score: {score}/100\n"
                 f"Missing / to improve: {missing}\n"
                 f"Link: {job.url}\n\n"
                 f"Reply to this email with the missing details (e.g. 'I have 5 years of "
@@ -208,7 +210,7 @@ class Orchestrator:
         self.sender.send(
             subject=f"❓ Need info to apply: {job.title} @ {job.company}",
             body=(
-                f"I started the application but don't have some required data:\n"
+                "I started the application but don't have some required data:\n"
                 + "\n".join(f"- {m}" for m in missing)
                 + f"\n\nJob: {job.title}\nCompany: {job.company}\nLink: {job.url}\n\n"
                 f"Reply with the answers and I'll finish the application."

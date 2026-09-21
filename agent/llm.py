@@ -58,7 +58,13 @@ class LLMClient:
             return json.loads(content)
         except json.JSONDecodeError:
             # Strip markdown fences if present, then retry.
-            cleaned = content.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+            cleaned = (
+                content.strip()
+                .removeprefix("```json")
+                .removeprefix("```")
+                .removesuffix("```")
+                .strip()
+            )
             return json.loads(cleaned)
 
     def vision(

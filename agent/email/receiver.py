@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from email import policy
 from email.parser import BytesParser
-from typing import Callable
 
 from imapclient import IMAPClient
 
