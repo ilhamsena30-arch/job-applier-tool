@@ -1,0 +1,11 @@
+services:
+  agent:
+    build: .
+    env_file: .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./recordings:/app/recordings
+      - ./credentials.json:/app/credentials.json:ro
+    restart: unless-stopped

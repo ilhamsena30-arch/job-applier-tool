@@ -1,0 +1,38 @@
+# ---- Web framework / dashboard ----
+fastapi>=0.115
+uvicorn[standard]>=0.32
+
+# ---- Config / models ----
+pydantic>=2.9
+pydantic-settings>=2.6
+python-dotenv>=1.0
+PyYAML>=6.0
+
+# ---- HTTP / LLM (OpenAI-compatible client -> DeepSeek) ----
+httpx>=0.27
+openai>=1.54
+
+# ---- Browser automation ----
+# Base Playwright (always installed). The AIHawk anti-detect engine
+# `invisible-playwright` is optional and auto-detected at runtime.
+playwright>=1.48
+
+# ---- Resume parsing / PDF ----
+pymupdf>=1.24
+reportlab>=4.2
+
+# ---- Email ----
+imapclient>=3.0
+
+# ---- Google Sheets ----
+google-api-python-client>=2.149
+google-auth>=2.35
+google-auth-oauthlib>=1.2
+google-auth-httplib2>=0.2
+
+# ---- Scraping / parsing ----
+beautifulsoup4>=4.12
+lxml>=5.3
+
+# ---- Utilities ----
+tenacity>=9.0

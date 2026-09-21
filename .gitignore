@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Secrets & credentials — never commit these
+.env
+credentials.json
+token.json
+*.serviceaccount.json
+
+# Personal data
+data/resume.pdf
+data/resume.json
+data/*.pdf
+data/*.json
+
+# Browser artifacts
+recordings/
+*.webm
+*.mp4
+screenshots/
+storage_state/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
