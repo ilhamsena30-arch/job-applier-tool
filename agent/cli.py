@@ -79,11 +79,51 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _find_free_port(host: str, start: int, attempts: int = 20) -> int:
+    """Return the first free TCP port at or after `start`."""
+    import socket
+
+    for port in range(start, start + attempts):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind((host, port))
+            except OSError:
+                continue
+            return port
+    raise RuntimeError(
+        f"No free port found in range {start}-{start + attempts - 1}. "
+        "Pass a different --port."
+    )
+
+
 def cmd_dashboard(args: argparse.Namespace) -> int:
-    """Run the web dashboard (live video stream + status)."""
+    """Run the web dashboard (live video stream + status).
+
+    If the requested port is busy, automatically picks the next free one so a
+    forgotten background server never blocks startup silently.
+    """
     import uvicorn
 
-    uvicorn.run("agent.dashboard:app", host=args.host, port=args.port, reload=False)
+    port = args.port
+    if args.auto_port:
+        free = _find_free_port(args.host, args.port)
+        if free != args.port:
+            print(f"Port {args.port} is busy; using {free} instead.")
+        port = free
+
+    print(f"Dashboard: http://{args.host}:{port}  (Ctrl+C to stop)")
+    try:
+        uvicorn.run("agent.dashboard:app", host=args.host, port=port, reload=False)
+    except SystemExit as exc:
+        # uvicorn exits with code 1 on bind failure; give a usable message.
+        if exc.code:
+            print(
+                f"\nCould not start on port {port} (already in use).\n"
+                f"Try:  python -m agent dashboard --port {port + 1}\n"
+                f"Or close the process already using {port}."
+            )
+        return int(exc.code or 0)
     return 0
 
 
@@ -117,7 +157,13 @@ def main() -> int:
     p_dash.add_argument("--host", default="127.0.0.1")
     p_dash.add_argument("--port", type=int, default=8000)
     p_dash.add_argument("--fps", type=float, default=3.0)
-    p_dash.set_defaults(func=cmd_dashboard)
+    p_dash.add_argument(
+        "--no-auto-port",
+        dest="auto_port",
+        action="store_false",
+        help="Fail instead of picking the next free port when --port is busy",
+    )
+    p_dash.set_defaults(func=cmd_dashboard, auto_port=True)
 
     args = parser.parse_args()
     return args.func(args)
