@@ -36,7 +36,8 @@ Quick version:
    ./.venv/Scripts/python.exe -m invisible_playwright fetch
    ```
 2. Copy `.env.example` → `.env` and fill in your keys (DeepSeek, Gmail app password, Sheets ID).
-3. Put your resume at `data/resume.pdf`.
+3. Drop your resume PDF into `data/` — **any** filename containing `resume`
+   (e.g. `Resume-Your_Name.pdf`). Newest wins; stale copies are pruned.
 4. Check everything: `./.venv/Scripts/python.exe -m agent doctor`
 
 ## Usage
@@ -46,7 +47,7 @@ prefix each command with `./.venv/Scripts/python.exe`.
 
 ```bash
 python -m agent doctor            # check your setup first
-python -m agent extract           # resume.pdf -> resume.json
+python -m agent extract           # resume PDF -> resume.json
 python -m agent search "python developer" --location remote   # search boards
 python -m agent apply "https://..." --title "SWE" --company "Acme"   # one-off apply
 python -m agent run               # poll inbox, handle your replies
@@ -68,7 +69,7 @@ agent/
   config.py       # settings from .env
   models.py       # Resume, Job, MatchResult, Application
   llm.py          # DeepSeek client (OpenAI-compatible)
-  resume/         # PDF -> JSON extraction
+  resume/         # PDF -> JSON extraction + filename discovery
   matching/       # scoring + threshold
   search/         # board adapters (LinkedIn, Indeed) + registry
   apply/          # form filler

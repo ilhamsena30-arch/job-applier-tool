@@ -52,16 +52,25 @@ def _pdf_page_images(pdf_path: Path, max_pages: int = 3) -> list[str]:
 
 
 def extract_resume(pdf_path: Path | None = None) -> Resume:
-    """Extract a Resume from the configured PDF.
+    """Extract a Resume from the discovered/configured PDF.
+
+    The filename is not hardcoded: any `*resume*.pdf` in the resume directory is
+    accepted, newest wins, and stale duplicates are pruned.
 
     Strategy: try embedded text first (cheap). If the PDF appears to be a
     scanned/image resume with little text, fall back to vision on page images.
     """
-    settings = get_settings()
-    pdf_path = Path(pdf_path) if pdf_path else settings.resume_pdf
-    if not pdf_path.exists():
-        raise FileNotFoundError(f"Resume PDF not found: {pdf_path}")
+    from agent.resume.discovery import find_resume
 
+    if pdf_path is not None:
+        resolved = Path(pdf_path)
+    else:
+        resolved = find_resume(explicit=None).path
+
+    if not resolved.exists():
+        raise FileNotFoundError(f"Resume PDF not found: {resolved}")
+
+    pdf_path = resolved
     llm = get_llm()
     text = _pdf_text(pdf_path)
 

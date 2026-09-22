@@ -161,14 +161,31 @@ def check_deepseek() -> Check:
 
 def check_gmail() -> Check:
     s = get_settings()
-    if s.gmail_user and s.gmail_app_password:
-        return Check("Gmail credentials", Status.OK, s.gmail_user)
-    return Check(
-        "Gmail credentials",
-        Status.FAIL,
-        "not set",
-        "Set GMAIL_USER + GMAIL_APP_PASSWORD (16-char App Password, needs 2FA)",
-    )
+    user = (s.gmail_user or "").strip()
+    if not user or not s.gmail_app_password:
+        return Check(
+            "Gmail credentials",
+            Status.FAIL,
+            "not set",
+            "Set GMAIL_USER + GMAIL_APP_PASSWORD (16-char App Password, needs 2FA)",
+        )
+    # Catch the template placeholder, which otherwise looks configured.
+    if user.lower() == "you@gmail.com":
+        return Check(
+            "Gmail credentials",
+            Status.FAIL,
+            "still the placeholder 'you@gmail.com'",
+            "Set GMAIL_USER to YOUR real Gmail address (the App Password must "
+            "belong to that same account)",
+        )
+    if "@" not in user:
+        return Check(
+            "Gmail credentials",
+            Status.FAIL,
+            f"'{user}' is not an email address",
+            "Set GMAIL_USER to your full Gmail address",
+        )
+    return Check("Gmail credentials", Status.OK, user)
 
 
 def check_google_sheets() -> list[Check]:
@@ -204,18 +221,30 @@ def check_google_sheets() -> list[Check]:
 def check_resume() -> list[Check]:
     out: list[Check] = []
     s = get_settings()
-    if s.resume_pdf.exists():
-        kb = s.resume_pdf.stat().st_size // 1024
-        out.append(Check("Resume PDF", Status.OK, f"{s.resume_pdf.name} ({kb} KB)"))
-    else:
+
+    from agent.resume.discovery import candidate_pdfs, find_resume
+
+    try:
+        result = find_resume(prune=True)
+    except FileNotFoundError:
+        found = candidate_pdfs(s.resume_search_dir)
+        detail = f"none matching *resume*.pdf in {s.resume_dir}/"
+        if found:
+            detail = f"{len(found)} found but none usable"
         out.append(
             Check(
                 "Resume PDF",
                 Status.FAIL,
-                f"missing: {s.resume_pdf_path}",
-                "Put your resume at data/resume.pdf",
+                detail,
+                "Add a PDF whose name contains 'resume' to data/ (e.g. Resume-Your_Name.pdf)",
             )
         )
+    else:
+        kb = result.path.stat().st_size // 1024
+        detail = f"{result.path.name} ({kb} KB)"
+        if result.removed:
+            detail += f" — pruned {len(result.removed)} stale"
+        out.append(Check("Resume PDF", Status.OK, detail))
 
     if s.resume_json.exists():
         out.append(Check("Resume JSON", Status.OK, s.resume_json.name))

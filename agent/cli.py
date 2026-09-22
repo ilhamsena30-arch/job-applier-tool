@@ -15,11 +15,17 @@ from agent.store import AppStore
 
 def cmd_extract(args: argparse.Namespace) -> int:
     """Extract resume PDF -> JSON."""
-    resume = extract_resume()
+    from agent.resume.discovery import describe, find_resume
+
+    found = find_resume()
+    print(describe(found))
+
+    resume = extract_resume(found.path)
     from agent.resume.extract import save_resume
 
     path = save_resume(resume)
-    print(f"Resume extracted -> {path}")
+    print(f"Extracted -> {path}")
+    print(f"  Name: {resume.name or '(not found)'}")
     print(f"  Skills: {len(resume.skills)} | Experience: {len(resume.experience)}")
     return 0
 

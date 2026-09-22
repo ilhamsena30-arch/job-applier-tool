@@ -39,9 +39,15 @@ class Settings(BaseSettings):
     spreadsheet_id: str = ""
 
     # ---- Data paths ----
-    resume_pdf_path: str = "data/resume.pdf"
+    # Resume PDF: left blank, the agent DISCOVERS it — any PDF in data/ whose
+    # name contains "resume" (case-insensitive), newest wins. Set a path here
+    # only to pin a specific file and skip discovery.
+    resume_pdf_path: str = ""
     resume_json_path: str = "data/resume.json"
     recordings_dir: str = "recordings"
+
+    #: Directory scanned for the resume PDF.
+    resume_dir: str = "data"
 
     # ---- Behaviour ----
     confidence_threshold: float = 75.0
@@ -53,8 +59,17 @@ class Settings(BaseSettings):
 
     # ---- Convenience helpers ----
     @property
-    def resume_pdf(self) -> Path:
+    def resume_pdf(self) -> Path | None:
+        """The pinned resume PDF, or None when discovery should be used."""
+        if not self.resume_pdf_path.strip():
+            return None
         p = Path(self.resume_pdf_path)
+        return p if p.is_absolute() else ROOT / p
+
+    @property
+    def resume_search_dir(self) -> Path:
+        """Directory scanned when discovering the resume PDF."""
+        p = Path(self.resume_dir)
         return p if p.is_absolute() else ROOT / p
 
     @property

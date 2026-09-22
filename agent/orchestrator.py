@@ -159,12 +159,7 @@ class Orchestrator:
         match = app.match
         score = match.score if match else 0.0
         if score >= self.settings.confidence_threshold:
-            pdf = generate_tailored_resume(
-                resume,
-                job,
-                match,
-                Path(self.settings.recordings_dir) / f"tailored_{app.id}.pdf",
-            )
+            pdf = generate_tailored_resume(resume, job, match)
             self.sender.send(
                 subject=f"🎯 Easy Apply match: {job.title} @ {job.company}",
                 body=(
