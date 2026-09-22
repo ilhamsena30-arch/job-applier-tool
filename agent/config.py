@@ -57,7 +57,24 @@ class Settings(BaseSettings):
     # "aihawk" (require it), or "playwright" (plain Chromium).
     browser_engine: str = "auto"
 
+    # ---- Auto runner (`python -m agent auto`) ----
+    # Job titles to search for, separated by "|".
+    search_queries: str = "SDET|QA Automation Engineer|Test Automation Engineer"
+    # Location passed to the boards (blank = remote).
+    search_location: str = ""
+    # How many jobs to take from each board per query.
+    search_limit: int = 10
+    # When false, forms are filled but NOT submitted (safe rehearsal).
+    auto_submit: bool = True
+    # Hours to sleep between batches when running with --loop.
+    loop_interval_hours: float = 6.0
+
     # ---- Convenience helpers ----
+    @property
+    def queries(self) -> list[str]:
+        """Search queries parsed from the pipe-separated `search_queries`."""
+        return [q.strip() for q in self.search_queries.split("|") if q.strip()]
+
     @property
     def resume_pdf(self) -> Path | None:
         """The pinned resume PDF, or None when discovery should be used."""

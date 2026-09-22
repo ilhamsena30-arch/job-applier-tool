@@ -132,9 +132,16 @@ SPREADSHEET_ID=1AbC...your_sheet_id...XyZ
 
 ```dotenv
 CONFIDENCE_THRESHOLD=75.0   # auto-apply at/above this score
-DAILY_RATE_LIMIT=10         # conservative; raise when you feel safe
+DAILY_RATE_LIMIT=10         # HARD cap on applications per day (enforced)
 HEADED=true                 # show the browser window
 BROWSER_ENGINE=auto         # auto | aihawk | playwright
+
+# What to search for, and how the auto runner behaves:
+SEARCH_QUERIES=SDET|QA Automation Engineer|Test Automation Engineer
+SEARCH_LOCATION=Jakarta
+SEARCH_LIMIT=10             # jobs per board per query
+AUTO_SUBMIT=true            # false = fill forms but never submit
+LOOP_INTERVAL_HOURS=6.0     # sleep between batches with --loop
 ```
 
 ### Verify
@@ -159,7 +166,16 @@ Every line should read `[ OK ]` before you continue.
 # 3. Dashboard with live video
 ./.venv/Scripts/python.exe -m agent dashboard --port 8000
 #    -> open http://127.0.0.1:8000 , click "Start demo browser"
+
+# 4. The full loop — dry run first (fills forms, submits nothing)
+./.venv/Scripts/python.exe -m agent auto --dry-run --limit 3
+
+# 5. When the dry run looks right, let it submit
+./.venv/Scripts/python.exe -m agent auto
 ```
+
+`agent auto` searches, matches, applies, tracks to your sheet, and emails you —
+then you can run it again, or use `--loop` to have it repeat on a schedule.
 
 ---
 

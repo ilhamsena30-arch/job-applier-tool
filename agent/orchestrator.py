@@ -18,8 +18,6 @@ from agent.models import (
     Application,
     ApplicationStatus,
     Job,
-    JobSource,
-    MatchResult,
     Resume,
     utcnow,
 )
@@ -36,10 +34,22 @@ class Orchestrator:
     browser: Browser | None = None
     tracker: Tracker | None = None
     sender: EmailSender | None = None
+    #: When False, forms are filled but the final submit is skipped.
+    dry_run: bool = False
 
     def __post_init__(self) -> None:
         self.tracker = self.tracker or Tracker()
         self.sender = self.sender or EmailSender()
+        self._store = None
+
+    @property
+    def store(self):
+        """Lazy app store, so every processed job is persisted for reply handling."""
+        if self._store is None:
+            from agent.store import AppStore
+
+            self._store = AppStore()
+        return self._store
 
     def _browser(self) -> Browser:
         if self.browser is None:
@@ -56,7 +66,7 @@ class Orchestrator:
         match = match_job(resume, job)
         app.match = match
         app.status = ApplicationStatus.MATCHED
-        self.tracker.upsert(app)
+        self._track(app)
 
         # Route decision.
         if job.easy_apply:
@@ -64,23 +74,34 @@ class Orchestrator:
             app.status = ApplicationStatus.NOTIFY_ONLY
             app.notes = "Easy Apply — notify only per policy."
             self._send_easy_apply_email(resume, app)
-            self.tracker.upsert(app)
+            self._track(app)
             return app
 
         if not should_auto_apply(match):
             app.status = ApplicationStatus.PENDING
             self._send_pending_email(resume, app)
             app.status = ApplicationStatus.AWAITING_REPLY
-            self.tracker.upsert(app)
+            self._track(app)
             return app
 
         # Above threshold -> apply.
         return self._apply(job, resume, app)
 
+    def _track(self, app: Application) -> None:
+        """Persist to the sheet tracker and the local store (best effort)."""
+        try:
+            self.tracker.upsert(app)
+        except Exception as exc:  # noqa: BLE001 - tracker must not break a run
+            print(f"  (tracker skipped: {type(exc).__name__}: {exc})")
+        try:
+            self.store.save(app)
+        except Exception as exc:  # noqa: BLE001 - store must not break a run
+            print(f"  (store skipped: {type(exc).__name__}: {exc})")
+
     def _apply(self, job: Job, resume: Resume, app: Application) -> Application:
         browser = self._browser()
         app.status = ApplicationStatus.APPLYING
-        self.tracker.upsert(app)
+        self._track(app)
 
         url = job.apply_url or job.url
         browser.goto(url)
@@ -95,7 +116,14 @@ class Orchestrator:
             app.extra["missing_fields"] = result.missing_fields
             self._send_missing_email(resume, app, result.missing_fields)
             app.status = ApplicationStatus.AWAITING_REPLY
-            self.tracker.upsert(app)
+            self._track(app)
+            return app
+
+        if self.dry_run:
+            # Rehearsal: everything filled, nothing submitted.
+            app.status = ApplicationStatus.PENDING
+            app.notes = "DRY RUN — form filled, not submitted."
+            self._track(app)
             return app
 
         # Final submit + success detection.
@@ -106,7 +134,7 @@ class Orchestrator:
         else:
             app.status = ApplicationStatus.FAILED
             app.notes = "Could not confirm submission (no thank-you page)."
-        self.tracker.upsert(app)
+        self._track(app)
         return app
 
     def _submit_and_confirm(self, browser: Browser) -> bool:
@@ -120,13 +148,13 @@ class Orchestrator:
             try:
                 browser.click(selector)
                 break
-            except Exception:
+            except Exception:  # noqa: BLE001,S112 - try the next candidate selector
                 continue
 
-        try:
+        import contextlib
+
+        with contextlib.suppress(Exception):
             browser.page.wait_for_load_state("domcontentloaded")
-        except Exception:
-            pass
         text = browser.content().lower()
         return any(
             marker in text
@@ -203,10 +231,10 @@ class Orchestrator:
         self.sender.send(
             subject=f"❓ Need info to apply: {job.title} @ {job.company}",
             body=(
-                f"I started the application but don't have some required data:\n"
+                "I started the application but don't have some required data:\n"
                 + "\n".join(f"- {m}" for m in missing)
                 + f"\n\nJob: {job.title}\nCompany: {job.company}\nLink: {job.url}\n\n"
-                f"Reply with the answers and I'll finish the application."
+                "Reply with the answers and I'll finish the application."
             ),
         )
 
@@ -253,11 +281,8 @@ class Orchestrator:
 
     def _reapply(self, app_id: str, body: str) -> None:
         """Re-load the original application and re-apply with an updated resume."""
-        from agent.store import AppStore
-
-        store = AppStore()
         try:
-            old_app = store.load(app_id)
+            old_app = self.store.load(app_id)
         except FileNotFoundError:
             self.sender.send(
                 subject=f"Re-apply failed for {app_id}",
@@ -271,5 +296,4 @@ class Orchestrator:
         new_app = self.process_job(old_app.job, resume)
         new_app.extra["reapplied_from"] = app_id
         new_app.reply_received_at = utcnow()
-        store.save(new_app)
-        self.tracker.upsert(new_app)
+        self._track(new_app)
