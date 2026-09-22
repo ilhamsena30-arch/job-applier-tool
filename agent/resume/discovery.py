@@ -78,11 +78,10 @@ def find_resume(
     # 1/2. Explicit path (argument beats config).
     pinned = explicit
     if pinned is None:
-        configured = Path(settings.resume_pdf_path)
-        configured = configured if configured.is_absolute() else ROOT / configured
-        # Config is only "pinned" when it actually exists; otherwise fall through
-        # to discovery so a renamed file does not break the run.
-        if configured.exists():
+        # `settings.resume_pdf` is None when the value is blank, so an unset
+        # RESUME_PDF_PATH correctly falls through to discovery.
+        configured = settings.resume_pdf
+        if configured is not None and configured.is_file():
             pinned = configured
 
     if pinned is not None:

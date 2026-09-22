@@ -109,7 +109,15 @@ def run_batch(
 
     log(f"Daily applications used: {applied_today(store)}/{settings.daily_rate_limit}")
 
-    # 1. Replies first, so a user answer is acted on before new work starts.
+    # 1. Browser first: launch it up front so the window is visible immediately
+    #    and a launch failure is fatal and obvious (see Orchestrator._browser).
+    browser = orch._browser()
+    if orch.dry_run:
+        log("Browser open. DRY RUN — forms are filled but NOT submitted.")
+    else:
+        log("Browser open — watch the window to see applications being filled.")
+
+    # 2. Replies: so a user answer is acted on before new work starts.
     if handle_replies:
         try:
             from agent.email.receiver import EmailReceiver
@@ -125,14 +133,14 @@ def run_batch(
         except Exception as exc:  # noqa: BLE001 - inbox trouble must not stop the batch
             log(f"  (skipping inbox poll: {type(exc).__name__}: {exc})")
 
-    # 2. Search.
+    # 3. Search.
     known_ids = {a.job.id for a in store.list()}
     known_urls = {a.job.url for a in store.list() if a.job.url}
     found: list[Job] = []
     for query in queries:
         log(f"Searching: {query!r} in {location or 'remote'} ...")
         try:
-            jobs = search_all(orch._browser(), query, location, limit_per_board=limit)
+            jobs = search_all(browser, query, location, limit_per_board=limit)
         except Exception as exc:  # noqa: BLE001 - one bad board must not stop others
             log(f"  search failed: {type(exc).__name__}: {exc}")
             continue
@@ -152,6 +160,7 @@ def run_batch(
             continue
 
         log(f"→ {job.company} — {job.title}")
+        log(f"   opening {job.url[:70]}")
         try:
             app = orch.process_job(job, resume)
         except Exception as exc:  # noqa: BLE001 - continue with the next job
@@ -173,7 +182,11 @@ def run_batch(
             log("  notify-only (Easy Apply) — emailed you the link")
         elif status in (ApplicationStatus.PENDING, ApplicationStatus.AWAITING_REPLY):
             result.pending += 1
-            log(f"  pending (score {app.match.score if app.match else '?'}) — emailed you")
+            # Distinguish a below-threshold match from a completed dry run.
+            if orch.dry_run and "DRY RUN" in (app.notes or ""):
+                log(f"  DRY RUN — form filled, not submitted (score {app.match.score if app.match else '?'})")
+            else:
+                log(f"  below threshold (score {app.match.score if app.match else '?'}) — emailed you")
         else:
             result.failed += 1
             log(f"  {status.value}")

@@ -98,7 +98,15 @@ def cmd_auto(args: argparse.Namespace) -> int:
         return 0
 
     if not args.loop:
-        return one_batch()
+        try:
+            return one_batch()
+        except KeyboardInterrupt:
+            print("\n\nInterrupted — nothing further was submitted.")
+            print("(Re-run without pressing Ctrl+C to let a batch finish.)")
+            return 130
+        except RuntimeError as exc:
+            print(f"\nERROR: {exc}")
+            return 1
 
     interval = args.interval or settings.loop_interval_hours
     print(f"Looping every {interval}h. Ctrl+C to stop.")

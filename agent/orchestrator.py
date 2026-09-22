@@ -53,9 +53,25 @@ class Orchestrator:
 
     def _browser(self) -> Browser:
         if self.browser is None:
-            self.browser = Browser(
-                BrowserOptions(record_dir=Path(self.settings.recordings_dir))
-            ).launch()
+            print(
+                f"Launching browser (engine={self.settings.browser_engine}, "
+                f"headed={self.settings.headed})… a window should appear shortly."
+            )
+            try:
+                self.browser = Browser(
+                    BrowserOptions(record_dir=Path(self.settings.recordings_dir))
+                ).launch()
+            except Exception as exc:
+                # A failed launch is fatal and must be obvious: every later step
+                # depends on the browser, so never let this be swallowed.
+                raise RuntimeError(
+                    f"Could not launch the browser ({type(exc).__name__}: {exc}).\n"
+                    "Things to try:\n"
+                    "  - BROWSER_ENGINE=playwright in .env to use plain Chromium\n"
+                    "  - python -m invisible_playwright fetch  (re-fetch AIHawk engine)\n"
+                    "  - python -m playwright install chromium (fallback browser)"
+                ) from exc
+            print("Browser ready.")
         return self.browser
 
     # ------------------------------------------------------------------ flow

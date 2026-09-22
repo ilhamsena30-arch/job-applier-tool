@@ -77,10 +77,16 @@ class Settings(BaseSettings):
 
     @property
     def resume_pdf(self) -> Path | None:
-        """The pinned resume PDF, or None when discovery should be used."""
-        if not self.resume_pdf_path.strip():
+        """The pinned resume PDF, or None when discovery should be used.
+
+        Returns None for a blank value, and also for a blank-looking path such as
+        ``"."`` (which ``Path("")`` produces) — otherwise discovery would be
+        skipped because the project root trivially "exists".
+        """
+        raw = self.resume_pdf_path.strip()
+        if not raw or raw in (".", "./", ".\\"):
             return None
-        p = Path(self.resume_pdf_path)
+        p = Path(raw)
         return p if p.is_absolute() else ROOT / p
 
     @property
