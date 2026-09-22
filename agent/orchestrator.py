@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from agent.apply.filler import FormFiller
+from agent.apply.navigation import reach_application_form
 from agent.browser.engine import Browser, BrowserOptions
 from agent.config import get_settings
 from agent.email.receiver import Reply
@@ -103,6 +104,11 @@ class Orchestrator:
         # Above threshold -> apply.
         return self._apply(job, resume, app)
 
+    @staticmethod
+    def _app_ref(app: Application) -> str:
+        """A stable token threaded into emails so a reply can be matched back."""
+        return f"[app-{app.id}]"
+
     def _track(self, app: Application) -> None:
         """Persist to the sheet tracker and the local store (best effort)."""
         try:
@@ -122,12 +128,29 @@ class Orchestrator:
         url = job.apply_url or job.url
         browser.goto(url)
 
+        # 1. Get to the form: click Apply / Apply now / Apply on company site
+        #    and follow redirects or new tabs. Without this, we stay on a job
+        #    *listing* and would report a fake "form filled" success.
+        try:
+            reached = reach_application_form(browser)
+        except Exception as exc:  # noqa: BLE001 - navigation failure is not fatal data loss
+            reached = False
+            app.extra["nav_error"] = f"{type(exc).__name__}: {exc}"
+        if not reached:
+            app.status = ApplicationStatus.FAILED
+            app.notes = (
+                "No application form reached — could not find an Apply button, "
+                "or only search/navigation fields are present."
+            )
+            self._track(app)
+            return app
+
         filler = FormFiller(browser)
         result = filler.fill_form(resume, app.match)
         app.notes = result.message
 
-        if result.missing_fields:
-            # We don't have the data -> stop and email the user (4b).
+        if not result.ok and result.missing_fields:
+            # No real form / or we lack required data -> stop and email (4b).
             app.status = ApplicationStatus.PENDING
             app.extra["missing_fields"] = result.missing_fields
             self._send_missing_email(resume, app, result.missing_fields)
@@ -186,6 +209,11 @@ class Orchestrator:
 
     # ---------------------------------------------------------------- emails
 
+    def _mark_emailed(self, app: Application) -> None:
+        """Record that a user-facing email was sent for this application."""
+        app.email_sent_at = utcnow()
+        self._track(app)
+
     def _send_success_email(self, resume: Resume, app: Application) -> None:
         job = app.job
         self.sender.send(
@@ -194,9 +222,11 @@ class Orchestrator:
                 f"Successfully applied.\n\n"
                 f"Job: {job.title}\nCompany: {job.company}\n"
                 f"Score: {app.match.score if app.match else '?'}\n"
-                f"Link: {job.url}\n"
+                f"Link: {job.url}\n\n"
+                f"Ref: {self._app_ref(app)}\n"
             ),
         )
+        self._mark_emailed(app)
 
     def _send_easy_apply_email(self, resume: Resume, app: Application) -> None:
         job = app.job
@@ -210,7 +240,8 @@ class Orchestrator:
                     f"Easy Apply job matched ({score:.0f}/100). "
                     f"Attached is your tailored resume.\n\n"
                     f"Company: {job.company}\nTitle: {job.title}\n"
-                    f"Apply here: {job.url}\n"
+                    f"Apply here: {job.url}\n\n"
+                    f"Ref: {self._app_ref(app)}\n"
                 ),
                 attachments=[pdf],
             )
@@ -221,9 +252,11 @@ class Orchestrator:
                 body=(
                     f"Easy Apply job scored {score:.0f}/100 (below threshold).\n"
                     f"What you may lack: {missing}\n\n"
-                    f"Apply here: {job.url}\n"
+                    f"Apply here: {job.url}\n\n"
+                    f"Ref: {self._app_ref(app)}\n"
                 ),
             )
+        self._mark_emailed(app)
 
     def _send_pending_email(self, resume: Resume, app: Application) -> None:
         job = app.job
@@ -237,10 +270,12 @@ class Orchestrator:
                 f"Score: {match.score if match else '?'}/100\n"
                 f"Missing / to improve: {missing}\n"
                 f"Link: {job.url}\n\n"
+                f"Ref: {self._app_ref(app)}\n\n"
                 f"Reply to this email with the missing details (e.g. 'I have 5 years of "
                 f"AWS experience') and I'll update your resume and re-apply."
             ),
         )
+        self._mark_emailed(app)
 
     def _send_missing_email(self, resume: Resume, app: Application, missing: list[str]) -> None:
         job = app.job
@@ -250,9 +285,11 @@ class Orchestrator:
                 "I started the application but don't have some required data:\n"
                 + "\n".join(f"- {m}" for m in missing)
                 + f"\n\nJob: {job.title}\nCompany: {job.company}\nLink: {job.url}\n\n"
+                f"Ref: {self._app_ref(app)}\n\n"
                 "Reply with the answers and I'll finish the application."
             ),
         )
+        self._mark_emailed(app)
 
     # ----------------------------------------------------------------- reply
 
@@ -267,7 +304,12 @@ class Orchestrator:
             self._update_resume_from_reply(reply.body, resume_path)
 
     def _extract_app_id(self, reply: Reply) -> str | None:
-        # Our emails include the app id in brackets; look for a 12-hex token.
+        # Our emails embed `[app-<id>]`; Gmail quotes the original body in the
+        # reply, so the token survives in `reply.body`. Search body + subject.
+        m = re.search(r"\[app-([0-9a-f]{12})\]", reply.body + " " + reply.subject)
+        if m:
+            return m.group(1)
+        # Fallback: any bare 12-hex token in the subject/in-reply-to.
         m = re.search(r"\b([0-9a-f]{12})\b", reply.subject + " " + reply.in_reply_to)
         return m.group(1) if m else None
 
@@ -296,7 +338,12 @@ class Orchestrator:
         save_resume(new_resume, resume_path)
 
     def _reapply(self, app_id: str, body: str) -> None:
-        """Re-load the original application and re-apply with an updated resume."""
+        """Step 4c: fold the user's answer into the resume and apply directly.
+
+        Re-running the full route would re-score and could pend the job again,
+        stranding the user in a loop. Once the user answers, we apply: the
+        missing data is now present, so we go straight to the form.
+        """
         try:
             old_app = self.store.load(app_id)
         except FileNotFoundError:
@@ -306,10 +353,15 @@ class Orchestrator:
             )
             return
 
-        # Update the resume JSON with the user's reply, then re-run the flow.
+        # 1. Update the resume JSON with the user's reply.
         self._update_resume_from_reply(body, None)
         resume = load_resume()
-        new_app = self.process_job(old_app.job, resume)
+
+        # 2. Re-score with the updated resume (for the record), then apply.
+        new_app = Application(id=uuid.uuid4().hex[:12], job=old_app.job)
+        new_app.match = match_job(resume, old_app.job)
+        new_app.status = ApplicationStatus.REAPPLYING
         new_app.extra["reapplied_from"] = app_id
         new_app.reply_received_at = utcnow()
         self._track(new_app)
+        self._apply(old_app.job, resume, new_app)

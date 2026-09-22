@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from agent.config import get_settings
+from agent.identity import canonical_job_key
 from agent.models import Application, ApplicationStatus, Job, Resume
 from agent.orchestrator import Orchestrator
 from agent.ratelimit import applied_today, remaining_today
@@ -58,24 +59,17 @@ class BatchResult:
 def _dedupe(jobs: list[Job]) -> list[Job]:
     """Drop duplicate jobs.
 
-    When a job has a URL, the URL is the identity — the same company can post
-    the same title in several locations, and those are distinct openings.
-    The company+title pair is only used as a fallback when the URL is missing.
+    Job-board tracking URLs change on every visit, so identity is a canonical
+    key (e.g. Indeed's ``jk`` posting id) rather than the raw URL. When no
+    canonical key is derivable, the company+title pair is the fallback.
     """
-    seen_url: set[str] = set()
-    seen_pair: set[tuple[str, str]] = set()
+    seen: set[str] = set()
     out: list[Job] = []
     for job in jobs:
-        url = (job.url or "").strip()
-        if url:
-            if url in seen_url:
-                continue
-            seen_url.add(url)
-        else:
-            pair = (job.company.strip().lower(), job.title.strip().lower())
-            if pair in seen_pair:
-                continue
-            seen_pair.add(pair)
+        key = canonical_job_key(job.url, job.company, job.title)
+        if key in seen:
+            continue
+        seen.add(key)
         out.append(job)
     return out
 
@@ -135,7 +129,7 @@ def run_batch(
 
     # 3. Search.
     known_ids = {a.job.id for a in store.list()}
-    known_urls = {a.job.url for a in store.list() if a.job.url}
+    known_keys = {canonical_job_key(a.job.url, a.job.company, a.job.title) for a in store.list()}
     found: list[Job] = []
     for query in queries:
         log(f"Searching: {query!r} in {location or 'remote'} ...")
@@ -155,7 +149,8 @@ def run_batch(
         if remaining_today(store) <= 0:
             result.skipped_no_capacity += 1
             continue
-        if job.id in known_ids or (job.url and job.url in known_urls):
+        key = canonical_job_key(job.url, job.company, job.title)
+        if job.id in known_ids or key in known_keys:
             result.seen_before += 1
             continue
 
@@ -172,6 +167,7 @@ def run_batch(
         result.applications.append(app)
         result.processed += 1
         known_ids.add(job.id)
+        known_keys.add(key)
 
         status = app.status
         if status is ApplicationStatus.APPLIED:
