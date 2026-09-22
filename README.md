@@ -24,24 +24,33 @@
 
 ## Setup
 
+**See [SETUP.md](SETUP.md) for the full step-by-step guide** (resume, API keys,
+Gmail App Password, Google Sheets, LinkedIn caveats).
+
+Quick version:
+
 1. Install dependencies:
    ```bash
-   python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-   pip install -r requirements.txt
-   playwright install chromium
+   python -m venv .venv
+   ./.venv/Scripts/python.exe -m pip install -r requirements.txt
+   ./.venv/Scripts/python.exe -m invisible_playwright fetch
    ```
-   (Optional anti-detect engine: `pip install invisible-playwright` — see AIHawk.)
 2. Copy `.env.example` → `.env` and fill in your keys (DeepSeek, Gmail app password, Sheets ID).
 3. Put your resume at `data/resume.pdf`.
+4. Check everything: `./.venv/Scripts/python.exe -m agent doctor`
 
 ## Usage
 
+Activate the venv once (`source .venv/Scripts/activate`) so `python` works, or
+prefix each command with `./.venv/Scripts/python.exe`.
+
 ```bash
-python -m agent extract                      # resume.pdf -> resume.json
+python -m agent doctor            # check your setup first
+python -m agent extract           # resume.pdf -> resume.json
 python -m agent search "python developer" --location remote   # search boards
 python -m agent apply "https://..." --title "SWE" --company "Acme"   # one-off apply
-python -m agent run                          # poll inbox, handle your replies
-uvicorn agent.dashboard:app --reload         # web dashboard (status + recordings)
+python -m agent run               # poll inbox, handle your replies
+python -m agent dashboard --port 8000    # web dashboard (live video + status)
 ```
 
 ## Decisions & safety
@@ -68,7 +77,9 @@ agent/
   tracker/        # Google Sheets
   pdf/            # tailored resume PDF
   store.py        # JSON application store
+  doctor.py       # setup diagnostics (`agent doctor`)
   orchestrator.py # main loop
   cli.py, dashboard.py
+SETUP.md          # step-by-step setup guide
 skills/resume-updater/SKILL.md   # VS Code agent skill
 ```

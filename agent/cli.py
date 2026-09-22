@@ -62,6 +62,15 @@ def cmd_search(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Check that the environment is configured correctly."""
+    from agent.doctor import format_report, run_all
+
+    report = run_all()
+    print(format_report(report))
+    return 0 if report.ok else 1
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     """Run the reply-processing loop (poll inbox, handle 4c replies)."""
     resume = load_resume()
@@ -89,6 +98,9 @@ def main() -> int:
 
     p_extract = sub.add_parser("extract", help="Extract resume PDF -> JSON")
     p_extract.set_defaults(func=cmd_extract)
+
+    p_doctor = sub.add_parser("doctor", help="Check that your setup is configured")
+    p_doctor.set_defaults(func=cmd_doctor)
 
     p_apply = sub.add_parser("apply", help="Apply to a single job URL")
     p_apply.add_argument("url")
