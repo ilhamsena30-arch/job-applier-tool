@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from agent.apply.filler import FormFiller
+from agent.apply.navigation import reach_application_form
 from agent.browser.engine import Browser, BrowserOptions
 from agent.config import get_settings
 from agent.email.receiver import Reply
@@ -18,8 +19,6 @@ from agent.models import (
     Application,
     ApplicationStatus,
     Job,
-    JobSource,
-    MatchResult,
     Resume,
     utcnow,
 )
@@ -36,16 +35,44 @@ class Orchestrator:
     browser: Browser | None = None
     tracker: Tracker | None = None
     sender: EmailSender | None = None
+    #: When False, forms are filled but the final submit is skipped.
+    dry_run: bool = False
 
     def __post_init__(self) -> None:
         self.tracker = self.tracker or Tracker()
         self.sender = self.sender or EmailSender()
+        self._store = None
+
+    @property
+    def store(self):
+        """Lazy app store, so every processed job is persisted for reply handling."""
+        if self._store is None:
+            from agent.store import AppStore
+
+            self._store = AppStore()
+        return self._store
 
     def _browser(self) -> Browser:
         if self.browser is None:
-            self.browser = Browser(
-                BrowserOptions(record_dir=Path(self.settings.recordings_dir))
-            ).launch()
+            print(
+                f"Launching browser (engine={self.settings.browser_engine}, "
+                f"headed={self.settings.headed})… a window should appear shortly."
+            )
+            try:
+                self.browser = Browser(
+                    BrowserOptions(record_dir=Path(self.settings.recordings_dir))
+                ).launch()
+            except Exception as exc:
+                # A failed launch is fatal and must be obvious: every later step
+                # depends on the browser, so never let this be swallowed.
+                raise RuntimeError(
+                    f"Could not launch the browser ({type(exc).__name__}: {exc}).\n"
+                    "Things to try:\n"
+                    "  - BROWSER_ENGINE=playwright in .env to use plain Chromium\n"
+                    "  - python -m invisible_playwright fetch  (re-fetch AIHawk engine)\n"
+                    "  - python -m playwright install chromium (fallback browser)"
+                ) from exc
+            print("Browser ready.")
         return self.browser
 
     # ------------------------------------------------------------------ flow
@@ -56,7 +83,7 @@ class Orchestrator:
         match = match_job(resume, job)
         app.match = match
         app.status = ApplicationStatus.MATCHED
-        self.tracker.upsert(app)
+        self._track(app)
 
         # Route decision.
         if job.easy_apply:
@@ -64,38 +91,78 @@ class Orchestrator:
             app.status = ApplicationStatus.NOTIFY_ONLY
             app.notes = "Easy Apply — notify only per policy."
             self._send_easy_apply_email(resume, app)
-            self.tracker.upsert(app)
+            self._track(app)
             return app
 
         if not should_auto_apply(match):
             app.status = ApplicationStatus.PENDING
             self._send_pending_email(resume, app)
             app.status = ApplicationStatus.AWAITING_REPLY
-            self.tracker.upsert(app)
+            self._track(app)
             return app
 
         # Above threshold -> apply.
         return self._apply(job, resume, app)
 
+    @staticmethod
+    def _app_ref(app: Application) -> str:
+        """A stable token threaded into emails so a reply can be matched back."""
+        return f"[app-{app.id}]"
+
+    def _track(self, app: Application) -> None:
+        """Persist to the sheet tracker and the local store (best effort)."""
+        try:
+            self.tracker.upsert(app)
+        except Exception as exc:  # noqa: BLE001 - tracker must not break a run
+            print(f"  (tracker skipped: {type(exc).__name__}: {exc})")
+        try:
+            self.store.save(app)
+        except Exception as exc:  # noqa: BLE001 - store must not break a run
+            print(f"  (store skipped: {type(exc).__name__}: {exc})")
+
     def _apply(self, job: Job, resume: Resume, app: Application) -> Application:
         browser = self._browser()
         app.status = ApplicationStatus.APPLYING
-        self.tracker.upsert(app)
+        self._track(app)
 
         url = job.apply_url or job.url
         browser.goto(url)
+
+        # 1. Get to the form: click Apply / Apply now / Apply on company site
+        #    and follow redirects or new tabs. Without this, we stay on a job
+        #    *listing* and would report a fake "form filled" success.
+        try:
+            reached = reach_application_form(browser)
+        except Exception as exc:  # noqa: BLE001 - navigation failure is not fatal data loss
+            reached = False
+            app.extra["nav_error"] = f"{type(exc).__name__}: {exc}"
+        if not reached:
+            app.status = ApplicationStatus.FAILED
+            app.notes = (
+                "No application form reached — could not find an Apply button, "
+                "or only search/navigation fields are present."
+            )
+            self._track(app)
+            return app
 
         filler = FormFiller(browser)
         result = filler.fill_form(resume, app.match)
         app.notes = result.message
 
-        if result.missing_fields:
-            # We don't have the data -> stop and email the user (4b).
+        if not result.ok and result.missing_fields:
+            # No real form / or we lack required data -> stop and email (4b).
             app.status = ApplicationStatus.PENDING
             app.extra["missing_fields"] = result.missing_fields
             self._send_missing_email(resume, app, result.missing_fields)
             app.status = ApplicationStatus.AWAITING_REPLY
-            self.tracker.upsert(app)
+            self._track(app)
+            return app
+
+        if self.dry_run:
+            # Rehearsal: everything filled, nothing submitted.
+            app.status = ApplicationStatus.PENDING
+            app.notes = "DRY RUN — form filled, not submitted."
+            self._track(app)
             return app
 
         # Final submit + success detection.
@@ -106,7 +173,7 @@ class Orchestrator:
         else:
             app.status = ApplicationStatus.FAILED
             app.notes = "Could not confirm submission (no thank-you page)."
-        self.tracker.upsert(app)
+        self._track(app)
         return app
 
     def _submit_and_confirm(self, browser: Browser) -> bool:
@@ -120,13 +187,13 @@ class Orchestrator:
             try:
                 browser.click(selector)
                 break
-            except Exception:
+            except Exception:  # noqa: BLE001,S112 - try the next candidate selector
                 continue
 
-        try:
+        import contextlib
+
+        with contextlib.suppress(Exception):
             browser.page.wait_for_load_state("domcontentloaded")
-        except Exception:
-            pass
         text = browser.content().lower()
         return any(
             marker in text
@@ -142,17 +209,24 @@ class Orchestrator:
 
     # ---------------------------------------------------------------- emails
 
+    def _mark_emailed(self, app: Application) -> None:
+        """Record that a user-facing email was sent for this application."""
+        app.email_sent_at = utcnow()
+        self._track(app)
+
     def _send_success_email(self, resume: Resume, app: Application) -> None:
         job = app.job
         self.sender.send(
-            subject=f"✅ Applied: {job.title} @ {job.company}",
+            subject=f"✅ Applied: {job.title} @ {job.company} {self._app_ref(app)}",
             body=(
                 f"Successfully applied.\n\n"
                 f"Job: {job.title}\nCompany: {job.company}\n"
                 f"Score: {app.match.score if app.match else '?'}\n"
-                f"Link: {job.url}\n"
+                f"Link: {job.url}\n\n"
+                f"Ref: {self._app_ref(app)}\n"
             ),
         )
+        self._mark_emailed(app)
 
     def _send_easy_apply_email(self, resume: Resume, app: Application) -> None:
         job = app.job
@@ -161,54 +235,62 @@ class Orchestrator:
         if score >= self.settings.confidence_threshold:
             pdf = generate_tailored_resume(resume, job, match)
             self.sender.send(
-                subject=f"🎯 Easy Apply match: {job.title} @ {job.company}",
+                subject=f"🎯 Easy Apply match: {job.title} @ {job.company} {self._app_ref(app)}",
                 body=(
                     f"Easy Apply job matched ({score:.0f}/100). "
                     f"Attached is your tailored resume.\n\n"
                     f"Company: {job.company}\nTitle: {job.title}\n"
-                    f"Apply here: {job.url}\n"
+                    f"Apply here: {job.url}\n\n"
+                    f"Ref: {self._app_ref(app)}\n"
                 ),
                 attachments=[pdf],
             )
         else:
             missing = ", ".join(match.missing_skills) if match else ""
             self.sender.send(
-                subject=f"📌 Easy Apply (low match): {job.title} @ {job.company}",
+                subject=f"📌 Easy Apply (low match): {job.title} @ {job.company} {self._app_ref(app)}",
                 body=(
                     f"Easy Apply job scored {score:.0f}/100 (below threshold).\n"
                     f"What you may lack: {missing}\n\n"
-                    f"Apply here: {job.url}\n"
+                    f"Apply here: {job.url}\n\n"
+                    f"Ref: {self._app_ref(app)}\n"
                 ),
             )
+        self._mark_emailed(app)
 
     def _send_pending_email(self, resume: Resume, app: Application) -> None:
         job = app.job
         match = app.match
         missing = ", ".join(match.missing_skills) if match else ""
         self.sender.send(
-            subject=f"⏳ Pending: {job.title} @ {job.company} (score {match.score if match else '?'}/100)",
+            subject=f"⏳ Pending: {job.title} @ {job.company} "
+            f"(score {match.score if match else '?'}/100) {self._app_ref(app)}",
             body=(
                 f"Confidence too low to auto-apply.\n\n"
                 f"Job: {job.title}\nCompany: {job.company}\n"
                 f"Score: {match.score if match else '?'}/100\n"
                 f"Missing / to improve: {missing}\n"
                 f"Link: {job.url}\n\n"
+                f"Ref: {self._app_ref(app)}\n\n"
                 f"Reply to this email with the missing details (e.g. 'I have 5 years of "
                 f"AWS experience') and I'll update your resume and re-apply."
             ),
         )
+        self._mark_emailed(app)
 
     def _send_missing_email(self, resume: Resume, app: Application, missing: list[str]) -> None:
         job = app.job
         self.sender.send(
-            subject=f"❓ Need info to apply: {job.title} @ {job.company}",
+            subject=f"❓ Need info to apply: {job.title} @ {job.company} {self._app_ref(app)}",
             body=(
-                f"I started the application but don't have some required data:\n"
+                "I started the application but don't have some required data:\n"
                 + "\n".join(f"- {m}" for m in missing)
                 + f"\n\nJob: {job.title}\nCompany: {job.company}\nLink: {job.url}\n\n"
-                f"Reply with the answers and I'll finish the application."
+                f"Ref: {self._app_ref(app)}\n\n"
+                "Reply with the answers and I'll finish the application."
             ),
         )
+        self._mark_emailed(app)
 
     # ----------------------------------------------------------------- reply
 
@@ -223,7 +305,12 @@ class Orchestrator:
             self._update_resume_from_reply(reply.body, resume_path)
 
     def _extract_app_id(self, reply: Reply) -> str | None:
-        # Our emails include the app id in brackets; look for a 12-hex token.
+        # Our emails embed `[app-<id>]`; Gmail quotes the original body in the
+        # reply, so the token survives in `reply.body`. Search body + subject.
+        m = re.search(r"\[app-([0-9a-f]{12})\]", reply.body + " " + reply.subject)
+        if m:
+            return m.group(1)
+        # Fallback: any bare 12-hex token in the subject/in-reply-to.
         m = re.search(r"\b([0-9a-f]{12})\b", reply.subject + " " + reply.in_reply_to)
         return m.group(1) if m else None
 
@@ -252,24 +339,30 @@ class Orchestrator:
         save_resume(new_resume, resume_path)
 
     def _reapply(self, app_id: str, body: str) -> None:
-        """Re-load the original application and re-apply with an updated resume."""
-        from agent.store import AppStore
+        """Step 4c: fold the user's answer into the resume and apply directly.
 
-        store = AppStore()
+        Re-running the full route would re-score and could pend the job again,
+        stranding the user in a loop. Once the user answers, we apply: the
+        missing data is now present, so we go straight to the form.
+        """
         try:
-            old_app = store.load(app_id)
+            old_app = self.store.load(app_id)
         except FileNotFoundError:
             self.sender.send(
-                subject=f"Re-apply failed for {app_id}",
-                body=f"Could not find application {app_id}.",
+                subject="Re-apply failed [app-" + app_id + "]",
+                body="Could not find application " + app_id + ".",
             )
             return
 
-        # Update the resume JSON with the user's reply, then re-run the flow.
+        # 1. Update the resume JSON with the user's reply.
         self._update_resume_from_reply(body, None)
         resume = load_resume()
-        new_app = self.process_job(old_app.job, resume)
+
+        # 2. Re-score with the updated resume (for the record), then apply.
+        new_app = Application(id=uuid.uuid4().hex[:12], job=old_app.job)
+        new_app.match = match_job(resume, old_app.job)
+        new_app.status = ApplicationStatus.REAPPLYING
         new_app.extra["reapplied_from"] = app_id
         new_app.reply_received_at = utcnow()
-        store.save(new_app)
-        self.tracker.upsert(new_app)
+        self._track(new_app)
+        self._apply(old_app.job, resume, new_app)

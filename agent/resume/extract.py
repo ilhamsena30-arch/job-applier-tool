@@ -12,6 +12,9 @@ from agent.config import get_settings
 from agent.llm import get_llm
 from agent.models import Resume
 
+#: Committed answers the PDF cannot carry (visa, notice period, salary, links).
+_DEFAULTS_PATH = Path(__file__).resolve().parent / "resume_defaults.json"
+
 _SYSTEM_PROMPT = """You extract structured data from a resume into JSON.
 Return ONLY a valid JSON object with exactly these keys (use empty string / [] when unknown):
 {
@@ -101,7 +104,29 @@ def extract_resume(pdf_path: Path | None = None) -> Resume:
         ],
         model=llm.model,  # flash (vision-capable) by default
     )
-    return Resume(**data)
+    return apply_extra_defaults(Resume(**data))
+
+
+def apply_extra_defaults(resume: Resume, defaults: dict | None = None) -> Resume:
+    """Fill empty extra-info fields from the defaults file; never overwrite.
+
+    Answers like visa status or notice period are not on the PDF, so they are
+    committed separately and merged in whenever a resume is loaded. Values
+    already present in `data/resume.json` always win.
+    """
+    if defaults is None:
+        defaults = {}
+        if _DEFAULTS_PATH.exists():
+            try:
+                defaults = json.loads(_DEFAULTS_PATH.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                defaults = {}
+    for key, value in (defaults or {}).items():
+        if key not in Resume.model_fields:
+            continue
+        if not getattr(resume, key, ""):
+            setattr(resume, key, value)
+    return resume
 
 
 def save_resume(resume: Resume, path: Path | None = None) -> Path:
@@ -119,4 +144,4 @@ def load_resume(path: Path | None = None) -> Resume:
         raise FileNotFoundError(
             f"Resume JSON not found: {path}. Run extraction first."
         )
-    return Resume(**json.loads(path.read_text(encoding="utf-8")))
+    return apply_extra_defaults(Resume(**json.loads(path.read_text(encoding="utf-8"))))
