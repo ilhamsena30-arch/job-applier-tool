@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 
 from agent.browser.engine import Browser
+from agent.identity import canonical_job_key
 from agent.models import Job, JobSource
 from agent.search.base import JobSearchAdapter
 
@@ -70,7 +71,7 @@ class LinkedInSearch(JobSearchAdapter):
             url = "https://www.linkedin.com" + url
 
         return Job(
-            id=hashlib.sha1(url.encode()).hexdigest()[:16],
+            id=hashlib.sha1(canonical_job_key(url).encode()).hexdigest()[:16],
             title=title,
             company=company,
             location=location,

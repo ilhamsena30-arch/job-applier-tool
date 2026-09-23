@@ -143,6 +143,24 @@ class Browser:
 
     # -- primitives ---------------------------------------------------------
 
+    def switch_to_newest_page(self) -> None:
+        """Move the active page pointer to the most recently opened page.
+
+        Apply buttons often open a new tab (`target=_blank`) or an external ATS.
+        After clicking, call this so subsequent fill/read operations target the
+        form instead of the stale listing tab.
+        """
+        for candidate in (self._context, self._browser):
+            if candidate is None or not hasattr(candidate, "pages"):
+                continue
+            try:
+                pages = candidate.pages()
+            except Exception:  # noqa: BLE001,S112 - try the next object that has pages()
+                continue
+            if pages:
+                self._page = pages[-1]
+                return
+
     def goto(self, url: str) -> Any:
         return self.page.goto(url)
 

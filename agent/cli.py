@@ -13,11 +13,17 @@ from agent.resume.extract import extract_resume, load_resume
 
 def cmd_extract(args: argparse.Namespace) -> int:
     """Extract resume PDF -> JSON."""
-    resume = extract_resume()
+    from agent.resume.discovery import describe, find_resume
+
+    found = find_resume()
+    print(describe(found))
+
+    resume = extract_resume(found.path)
     from agent.resume.extract import save_resume
 
     path = save_resume(resume)
-    print(f"Resume extracted -> {path}")
+    print(f"Extracted -> {path}")
+    print(f"  Name: {resume.name or '(not found)'}")
     print(f"  Skills: {len(resume.skills)} | Experience: {len(resume.experience)}")
     return 0
 
@@ -60,6 +66,60 @@ def cmd_search(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Check that the environment is configured correctly."""
+    from agent.doctor import format_report, run_all
+
+    report = run_all()
+    print(format_report(report))
+    return 0 if report.ok else 1
+
+
+def cmd_auto(args: argparse.Namespace) -> int:
+    """Run the full loop: search -> match -> apply -> track -> email -> replies."""
+    from agent.config import get_settings
+    from agent.runner import run_batch
+
+    settings = get_settings()
+
+    if not args.submit:
+        print("SAFE MODE: forms will be filled but NOT submitted.\n")
+
+    queries = [q.strip() for q in args.query.split("|") if q.strip()] if args.query else None
+
+    def one_batch() -> int:
+        result = run_batch(
+            queries=queries,
+            location=args.location,
+            limit_per_query=args.limit,
+            dry_run=not args.submit,
+        )
+        print(result.summary())
+        return 0
+
+    if not args.loop:
+        try:
+            return one_batch()
+        except KeyboardInterrupt:
+            print("\n\nInterrupted — nothing further was submitted.")
+            print("(Re-run without pressing Ctrl+C to let a batch finish.)")
+            return 130
+        except RuntimeError as exc:
+            print(f"\nERROR: {exc}")
+            return 1
+
+    interval = args.interval or settings.loop_interval_hours
+    print(f"Looping every {interval}h. Ctrl+C to stop.")
+    try:
+        while True:
+            one_batch()
+            print(f"\nSleeping {interval}h...")
+            time.sleep(interval * 3600)
+    except KeyboardInterrupt:
+        print("\nStopped.")
+        return 0
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     """Run the reply-processing loop (poll inbox, handle 4c replies)."""
     orch = Orchestrator()
@@ -94,6 +154,9 @@ def main() -> int:
     p_extract = sub.add_parser("extract", help="Extract resume PDF -> JSON")
     p_extract.set_defaults(func=cmd_extract)
 
+    p_doctor = sub.add_parser("doctor", help="Check that your setup is configured")
+    p_doctor.set_defaults(func=cmd_doctor)
+
     p_apply = sub.add_parser("apply", help="Apply to a single job URL")
     p_apply.add_argument("url")
     p_apply.add_argument("--title")
@@ -108,6 +171,31 @@ def main() -> int:
     p_search.add_argument("--limit", type=int, default=10)
     p_search.add_argument("--headed", action="store_true")
     p_search.set_defaults(func=cmd_search)
+
+    p_auto = sub.add_parser(
+        "auto", help="Run the full loop: search, match, apply, track, email"
+    )
+    p_auto.add_argument(
+        "--query",
+        help="Job titles separated by '|' (default: SEARCH_QUERIES from .env)",
+    )
+    p_auto.add_argument("--location", help="Location (default: SEARCH_LOCATION from .env)")
+    p_auto.add_argument("--limit", type=int, help="Jobs per board per query")
+    p_auto.add_argument(
+        "--loop",
+        action="store_true",
+        help="Keep running: batch, sleep, repeat (Ctrl+C to stop)",
+    )
+    p_auto.add_argument(
+        "--interval", type=float, help="Hours between batches in --loop mode"
+    )
+    p_auto.add_argument(
+        "--dry-run",
+        dest="submit",
+        action="store_false",
+        help="Fill forms but do NOT submit (safe rehearsal)",
+    )
+    p_auto.set_defaults(func=cmd_auto, submit=True)
 
     p_run = sub.add_parser("run", help="Poll inbox and process replies")
     p_run.add_argument("--interval", type=int, default=60)

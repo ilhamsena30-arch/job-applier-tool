@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from reportlab.lib.pagesizes import letter
@@ -11,13 +12,48 @@ from reportlab.pdfgen import canvas
 from agent.models import Job, MatchResult, Resume
 
 
+def _safe(part: str, max_len: int = 40) -> str:
+    """Make a string safe for a filename (keep alphanumerics, _ and -)."""
+    cleaned = re.sub(r"[^A-Za-z0-9]+", "_", (part or "").strip()).strip("_")
+    return cleaned[:max_len]
+
+
+def tailored_filename(resume: Resume, job: Job) -> str:
+    """Professional filename for a tailored resume, e.g.
+
+    ``Ilham_Perdana_Jalasena_Resume_Acme.pdf``
+
+    When the resume has no name, uses ``Resume_<Company>.pdf``. Omits the
+    company when the job has none.
+    """
+    name = _safe(resume.name)
+    company = _safe(job.company)
+
+    parts: list[str] = []
+    if name:
+        parts.extend([name, "Resume"])
+    else:
+        parts.append("Resume")
+    if company:
+        parts.append(company)
+    return "_".join(parts) + ".pdf"
+
+
 def generate_tailored_resume(
     resume: Resume,
     job: Job,
     match: MatchResult | None,
-    out_path: Path,
+    out_path: Path | None = None,
 ) -> Path:
-    """Render a clean single-page resume PDF tailored to the job."""
+    """Render a clean single-page resume PDF tailored to the job.
+
+    When `out_path` is omitted, a professional filename is derived from the
+    candidate name and company and written next to the other outputs.
+    """
+    from agent.config import get_settings
+
+    if out_path is None:
+        out_path = get_settings().recordings / tailored_filename(resume, job)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 

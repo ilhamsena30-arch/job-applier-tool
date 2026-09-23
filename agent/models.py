@@ -40,6 +40,11 @@ class Resume(BaseModel):
     location: str = ""
     linkedin: str = ""
     website: str = ""
+    #: Answers the agent needs for application forms; not on the PDF, so the
+    #: user provides them separately (survive re-extraction via resume.json).
+    work_authorization: str = ""
+    notice_period: str = ""
+    salary_expectation: str = ""
     summary: str = ""
     skills: list[str] = Field(default_factory=list)
     experience: list[Experience] = Field(default_factory=list)
