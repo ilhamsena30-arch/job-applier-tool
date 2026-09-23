@@ -38,11 +38,18 @@ Verify:
 
 ### 1.2 Add your resume
 
-Put your resume PDF at exactly:
+Drop your resume PDF into `data/`. **The filename is not hardcoded** — the agent
+finds any PDF whose name contains `resume` (case-insensitive):
 
 ```
-data/resume.pdf
+data/Resume-Ilham_Perdana_Jalasena-SDET.pdf   -> matched
+data/Ilham_Perdana_Resume.pdf                 -> matched
+data/cv-2027.pdf                              -> NOT matched (no "resume")
 ```
+
+If several PDFs match, the **newest by modified time wins and the others are
+deleted**, so exactly one resume remains. To pin a specific file instead, set
+`RESUME_PDF_PATH` in `.env` (that skips discovery and cleanup).
 
 Then convert it to structured JSON:
 
@@ -50,9 +57,10 @@ Then convert it to structured JSON:
 ./.venv/Scripts/python.exe -m agent extract
 ```
 
-This writes `data/resume.json`. **Open it and check it is correct** — the agent
-uses this file for matching, form-filling and the tailored PDF. Fix errors by
-hand; it is plain JSON.
+This writes `data/resume.json` (always that name — it is an internal artifact and
+is never sent to employers). **Open it and check it is correct** — the agent uses
+this file for matching, form-filling and the tailored PDF. Fix errors by hand; it
+is plain JSON.
 
 > `data/*.pdf` and `data/*.json` are gitignored, so your resume is never committed.
 
@@ -124,9 +132,16 @@ SPREADSHEET_ID=1AbC...your_sheet_id...XyZ
 
 ```dotenv
 CONFIDENCE_THRESHOLD=75.0   # auto-apply at/above this score
-DAILY_RATE_LIMIT=10         # conservative; raise when you feel safe
+DAILY_RATE_LIMIT=10         # HARD cap on applications per day (enforced)
 HEADED=true                 # show the browser window
 BROWSER_ENGINE=auto         # auto | aihawk | playwright
+
+# What to search for, and how the auto runner behaves:
+SEARCH_QUERIES=SDET|QA Automation Engineer|Test Automation Engineer
+SEARCH_LOCATION=Jakarta
+SEARCH_LIMIT=10             # jobs per board per query
+AUTO_SUBMIT=true            # false = fill forms but never submit
+LOOP_INTERVAL_HOURS=6.0     # sleep between batches with --loop
 ```
 
 ### Verify
@@ -151,7 +166,16 @@ Every line should read `[ OK ]` before you continue.
 # 3. Dashboard with live video
 ./.venv/Scripts/python.exe -m agent dashboard --port 8000
 #    -> open http://127.0.0.1:8000 , click "Start demo browser"
+
+# 4. The full loop — dry run first (fills forms, submits nothing)
+./.venv/Scripts/python.exe -m agent auto --dry-run --limit 3
+
+# 5. When the dry run looks right, let it submit
+./.venv/Scripts/python.exe -m agent auto
 ```
+
+`agent auto` searches, matches, applies, tracks to your sheet, and emails you —
+then you can run it again, or use `--loop` to have it repeat on a schedule.
 
 ---
 
@@ -203,7 +227,7 @@ the adapter warms up the homepage first to get past the bot wall.
 
 - [ ] `.env` exists and is **not** committed (`git status` must not list it)
 - [ ] `credentials.json` is **not** committed
-- [ ] `data/resume.pdf` and `data/resume.json` are **not** committed
+- [ ] `data/*.pdf` (your resume, any name) and `data/resume.json` are **not** committed
 - [ ] Gmail uses an App Password, not your real password
 - [ ] LinkedIn uses a low-value account (only if you enable sessions later)
 

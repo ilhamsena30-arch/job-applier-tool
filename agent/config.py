@@ -39,9 +39,15 @@ class Settings(BaseSettings):
     spreadsheet_id: str = ""
 
     # ---- Data paths ----
-    resume_pdf_path: str = "data/resume.pdf"
+    # Resume PDF: left blank, the agent DISCOVERS it — any PDF in data/ whose
+    # name contains "resume" (case-insensitive), newest wins. Set a path here
+    # only to pin a specific file and skip discovery.
+    resume_pdf_path: str = ""
     resume_json_path: str = "data/resume.json"
     recordings_dir: str = "recordings"
+
+    #: Directory scanned for the resume PDF.
+    resume_dir: str = "data"
 
     # ---- Behaviour ----
     confidence_threshold: float = 75.0
@@ -51,10 +57,42 @@ class Settings(BaseSettings):
     # "aihawk" (require it), or "playwright" (plain Chromium).
     browser_engine: str = "auto"
 
+    # ---- Auto runner (`python -m agent auto`) ----
+    # Job titles to search for, separated by "|".
+    search_queries: str = "SDET|QA Automation Engineer|Test Automation Engineer"
+    # Location passed to the boards (blank = remote).
+    search_location: str = ""
+    # How many jobs to take from each board per query.
+    search_limit: int = 10
+    # When false, forms are filled but NOT submitted (safe rehearsal).
+    auto_submit: bool = True
+    # Hours to sleep between batches when running with --loop.
+    loop_interval_hours: float = 6.0
+
     # ---- Convenience helpers ----
     @property
-    def resume_pdf(self) -> Path:
-        p = Path(self.resume_pdf_path)
+    def queries(self) -> list[str]:
+        """Search queries parsed from the pipe-separated `search_queries`."""
+        return [q.strip() for q in self.search_queries.split("|") if q.strip()]
+
+    @property
+    def resume_pdf(self) -> Path | None:
+        """The pinned resume PDF, or None when discovery should be used.
+
+        Returns None for a blank value, and also for a blank-looking path such as
+        ``"."`` (which ``Path("")`` produces) — otherwise discovery would be
+        skipped because the project root trivially "exists".
+        """
+        raw = self.resume_pdf_path.strip()
+        if not raw or raw in (".", "./", ".\\"):
+            return None
+        p = Path(raw)
+        return p if p.is_absolute() else ROOT / p
+
+    @property
+    def resume_search_dir(self) -> Path:
+        """Directory scanned when discovering the resume PDF."""
+        p = Path(self.resume_dir)
         return p if p.is_absolute() else ROOT / p
 
     @property

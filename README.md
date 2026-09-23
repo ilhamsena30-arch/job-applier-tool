@@ -36,7 +36,8 @@ Quick version:
    ./.venv/Scripts/python.exe -m invisible_playwright fetch
    ```
 2. Copy `.env.example` → `.env` and fill in your keys (DeepSeek, Gmail app password, Sheets ID).
-3. Put your resume at `data/resume.pdf`.
+3. Drop your resume PDF into `data/` — **any** filename containing `resume`
+   (e.g. `Resume-Your_Name.pdf`). Newest wins; stale copies are pruned.
 4. Check everything: `./.venv/Scripts/python.exe -m agent doctor`
 
 ## Usage
@@ -46,12 +47,37 @@ prefix each command with `./.venv/Scripts/python.exe`.
 
 ```bash
 python -m agent doctor            # check your setup first
-python -m agent extract           # resume.pdf -> resume.json
-python -m agent search "python developer" --location remote   # search boards
-python -m agent apply "https://..." --title "SWE" --company "Acme"   # one-off apply
-python -m agent run               # poll inbox, handle your replies
+python -m agent extract           # resume PDF -> resume.json
+python -m agent auto              # THE FULL LOOP: search, match, apply, track, email
+python -m agent auto --dry-run    # fill forms but do NOT submit (safe rehearsal)
+python -m agent auto --loop --interval 6   # batch, sleep 6h, repeat (Ctrl+C to stop)
+python -m agent search "python developer" --location remote   # search only
+python -m agent apply "https://..." --title "SWE" --company "Acme"   # one job
+python -m agent run               # only poll inbox for your replies
 python -m agent dashboard --port 8000    # web dashboard (live video + status)
 ```
+
+### `agent auto`
+
+One command runs the whole pipeline:
+
+1. Polls the inbox and handles your replies (step 4c).
+2. Searches every query in `SEARCH_QUERIES` across the job boards.
+3. De-duplicates, and skips jobs already handled before.
+4. For each job: match → route → apply/notify → track → email.
+5. Stops early once `DAILY_RATE_LIMIT` is reached.
+
+| Flag | Purpose |
+| --- | --- |
+| `--query "A\|B"` | Override `SEARCH_QUERIES` for this run |
+| `--location` | Override `SEARCH_LOCATION` |
+| `--limit` | Jobs per board per query |
+| `--dry-run` | Fill forms but **do not submit** |
+| `--loop` | Repeat: batch, sleep, batch… |
+| `--interval H` | Hours to sleep between batches (default `LOOP_INTERVAL_HOURS`) |
+
+`DAILY_RATE_LIMIT` is **enforced** — the runner counts what was applied today
+and stops when the cap is hit.
 
 ## Decisions & safety
 
@@ -68,7 +94,7 @@ agent/
   config.py       # settings from .env
   models.py       # Resume, Job, MatchResult, Application
   llm.py          # DeepSeek client (OpenAI-compatible)
-  resume/         # PDF -> JSON extraction
+  resume/         # PDF -> JSON extraction + filename discovery
   matching/       # scoring + threshold
   search/         # board adapters (LinkedIn, Indeed) + registry
   apply/          # form filler
@@ -78,7 +104,9 @@ agent/
   pdf/            # tailored resume PDF
   store.py        # JSON application store
   doctor.py       # setup diagnostics (`agent doctor`)
-  orchestrator.py # main loop
+  ratelimit.py    # enforces DAILY_RATE_LIMIT
+  runner.py       # batch driver for `agent auto`
+  orchestrator.py # match -> route -> apply -> track -> email
   cli.py, dashboard.py
 SETUP.md          # step-by-step setup guide
 skills/resume-updater/SKILL.md   # VS Code agent skill

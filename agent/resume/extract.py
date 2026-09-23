@@ -12,6 +12,9 @@ from agent.config import get_settings
 from agent.llm import get_llm
 from agent.models import Resume
 
+#: Committed answers the PDF cannot carry (visa, notice period, salary, links).
+_DEFAULTS_PATH = Path(__file__).resolve().parent / "resume_defaults.json"
+
 _SYSTEM_PROMPT = """You extract structured data from a resume into JSON.
 Return ONLY a valid JSON object with exactly these keys (use empty string / [] when unknown):
 {
@@ -52,16 +55,25 @@ def _pdf_page_images(pdf_path: Path, max_pages: int = 3) -> list[str]:
 
 
 def extract_resume(pdf_path: Path | None = None) -> Resume:
-    """Extract a Resume from the configured PDF.
+    """Extract a Resume from the discovered/configured PDF.
+
+    The filename is not hardcoded: any `*resume*.pdf` in the resume directory is
+    accepted, newest wins, and stale duplicates are pruned.
 
     Strategy: try embedded text first (cheap). If the PDF appears to be a
     scanned/image resume with little text, fall back to vision on page images.
     """
-    settings = get_settings()
-    pdf_path = Path(pdf_path) if pdf_path else settings.resume_pdf
-    if not pdf_path.exists():
-        raise FileNotFoundError(f"Resume PDF not found: {pdf_path}")
+    from agent.resume.discovery import find_resume
 
+    if pdf_path is not None:
+        resolved = Path(pdf_path)
+    else:
+        resolved = find_resume(explicit=None).path
+
+    if not resolved.exists():
+        raise FileNotFoundError(f"Resume PDF not found: {resolved}")
+
+    pdf_path = resolved
     llm = get_llm()
     text = _pdf_text(pdf_path)
 
@@ -92,7 +104,29 @@ def extract_resume(pdf_path: Path | None = None) -> Resume:
         ],
         model=llm.model,  # flash (vision-capable) by default
     )
-    return Resume(**data)
+    return apply_extra_defaults(Resume(**data))
+
+
+def apply_extra_defaults(resume: Resume, defaults: dict | None = None) -> Resume:
+    """Fill empty extra-info fields from the defaults file; never overwrite.
+
+    Answers like visa status or notice period are not on the PDF, so they are
+    committed separately and merged in whenever a resume is loaded. Values
+    already present in `data/resume.json` always win.
+    """
+    if defaults is None:
+        defaults = {}
+        if _DEFAULTS_PATH.exists():
+            try:
+                defaults = json.loads(_DEFAULTS_PATH.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                defaults = {}
+    for key, value in (defaults or {}).items():
+        if key not in Resume.model_fields:
+            continue
+        if not getattr(resume, key, ""):
+            setattr(resume, key, value)
+    return resume
 
 
 def save_resume(resume: Resume, path: Path | None = None) -> Path:
@@ -110,4 +144,4 @@ def load_resume(path: Path | None = None) -> Resume:
         raise FileNotFoundError(
             f"Resume JSON not found: {path}. Run extraction first."
         )
-    return Resume(**json.loads(path.read_text(encoding="utf-8")))
+    return apply_extra_defaults(Resume(**json.loads(path.read_text(encoding="utf-8"))))
