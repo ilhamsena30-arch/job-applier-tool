@@ -1,5 +1,5 @@
 """Apply engine: fill application forms via the browser."""
 
-from agent.apply.filler import FormFiller, ApplyResult
+from agent.apply.filler import ApplyResult, FormFiller
 
-__all__ = ["FormFiller", "ApplyResult"]
+__all__ = ["ApplyResult", "FormFiller"]

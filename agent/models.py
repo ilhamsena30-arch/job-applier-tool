@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +69,7 @@ class Resume(BaseModel):
 # Jobs & applications
 # ---------------------------------------------------------------------------
 
-class JobSource(str, Enum):
+class JobSource(StrEnum):
     LINKEDIN = "linkedin"
     INDEED = "indeed"
     AGGREGATOR = "aggregator"
@@ -100,7 +100,7 @@ class MatchResult(BaseModel):
     raw: dict[str, Any] = Field(default_factory=dict)
 
 
-class ApplicationStatus(str, Enum):
+class ApplicationStatus(StrEnum):
     QUEUED = "queued"
     MATCHED = "matched"          # scored, awaiting route decision
     APPLYING = "applying"        # form being filled

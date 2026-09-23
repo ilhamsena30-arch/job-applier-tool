@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -262,13 +263,14 @@ class Orchestrator:
         job = app.job
         match = app.match
         missing = ", ".join(match.missing_skills) if match else ""
+        score = match.score if match else "?"
         self.sender.send(
             subject=f"⏳ Pending: {job.title} @ {job.company} "
             f"(score {match.score if match else '?'}/100) {self._app_ref(app)}",
             body=(
                 f"Confidence too low to auto-apply.\n\n"
                 f"Job: {job.title}\nCompany: {job.company}\n"
-                f"Score: {match.score if match else '?'}/100\n"
+                f"Score: {score}/100\n"
                 f"Missing / to improve: {missing}\n"
                 f"Link: {job.url}\n\n"
                 f"Ref: {self._app_ref(app)}\n\n"

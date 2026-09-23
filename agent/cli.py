@@ -139,6 +139,14 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_dashboard(args: argparse.Namespace) -> int:
+    """Run the web dashboard (live video stream + status)."""
+    import uvicorn
+
+    uvicorn.run("agent.dashboard:app", host=args.host, port=args.port, reload=False)
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="job-agent", description="Autonomous job applier")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -192,6 +200,12 @@ def main() -> int:
     p_run = sub.add_parser("run", help="Poll inbox and process replies")
     p_run.add_argument("--interval", type=int, default=60)
     p_run.set_defaults(func=cmd_run)
+
+    p_dash = sub.add_parser("dashboard", help="Run the web dashboard with live video stream")
+    p_dash.add_argument("--host", default="127.0.0.1")
+    p_dash.add_argument("--port", type=int, default=8000)
+    p_dash.add_argument("--fps", type=float, default=3.0)
+    p_dash.set_defaults(func=cmd_dashboard)
 
     args = parser.parse_args()
     return args.func(args)

@@ -13,6 +13,7 @@ and create pages via `browser.new_page()`.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,7 @@ class Browser:
         self._context = None             # Playwright context (fallback path)
         self._page = None
         self._aihawk = None              # the InvisiblePlaywright context manager
+        self._shot_lock = threading.Lock()  # serialise screenshots from other threads
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -173,3 +175,13 @@ class Browser:
 
     def screenshot(self, path: Path) -> None:
         self.page.screenshot(path=str(path))
+
+    def capture_frame(self, quality: int = 70) -> bytes:
+        """Return a JPEG frame of the current page (for the live stream).
+
+        Thread-safe: the dashboard's stream endpoint calls this from a worker
+        thread while the orchestrator drives the page on the main thread, so
+        screenshots are serialised through a lock.
+        """
+        with self._shot_lock:
+            return self.page.screenshot(type="jpeg", quality=quality)

@@ -86,6 +86,7 @@ and stops when the cap is hit.
 - **LinkedIn:** dedicated low-value account, conservative pacing; Easy Apply is notify-only.
 - **Model:** `deepseek-flash` (vision-capable) for extraction/form-reading; `deepseek-v4-pro` for hard reasoning (no vision).
 - **Search:** dedicated adapters for LinkedIn and Indeed with warm-up + security-check retry (Indeed serves a bot wall on cold direct searches).
+- **Live view:** the dashboard streams the browser over MJPEG at ~3fps; the orchestrator registers its browser so every real application is watchable live. Recordings are still saved for replay.
 
 ## Project layout
 

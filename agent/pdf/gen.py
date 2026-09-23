@@ -122,7 +122,15 @@ def generate_tailored_resume(
     return out_path
 
 
-def _wrap(c: canvas.Canvas, text: str, x: float, y: float, max_w: float, size: int, gap: float) -> None:
+def _wrap(
+    c: canvas.Canvas,
+    text: str,
+    x: float,
+    y: float,
+    max_w: float,
+    size: int,
+    gap: float,
+) -> None:
     """Draw text with naive word wrapping; returns nothing (mutates via canvas)."""
     c.setFont("Helvetica", size)
     words = text.split()
