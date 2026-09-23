@@ -217,7 +217,7 @@ class Orchestrator:
     def _send_success_email(self, resume: Resume, app: Application) -> None:
         job = app.job
         self.sender.send(
-            subject=f"✅ Applied: {job.title} @ {job.company}",
+            subject=f"✅ Applied: {job.title} @ {job.company} {self._app_ref(app)}",
             body=(
                 f"Successfully applied.\n\n"
                 f"Job: {job.title}\nCompany: {job.company}\n"
@@ -235,7 +235,7 @@ class Orchestrator:
         if score >= self.settings.confidence_threshold:
             pdf = generate_tailored_resume(resume, job, match)
             self.sender.send(
-                subject=f"🎯 Easy Apply match: {job.title} @ {job.company}",
+                subject=f"🎯 Easy Apply match: {job.title} @ {job.company} {self._app_ref(app)}",
                 body=(
                     f"Easy Apply job matched ({score:.0f}/100). "
                     f"Attached is your tailored resume.\n\n"
@@ -248,7 +248,7 @@ class Orchestrator:
         else:
             missing = ", ".join(match.missing_skills) if match else ""
             self.sender.send(
-                subject=f"📌 Easy Apply (low match): {job.title} @ {job.company}",
+                subject=f"📌 Easy Apply (low match): {job.title} @ {job.company} {self._app_ref(app)}",
                 body=(
                     f"Easy Apply job scored {score:.0f}/100 (below threshold).\n"
                     f"What you may lack: {missing}\n\n"
@@ -263,7 +263,8 @@ class Orchestrator:
         match = app.match
         missing = ", ".join(match.missing_skills) if match else ""
         self.sender.send(
-            subject=f"⏳ Pending: {job.title} @ {job.company} (score {match.score if match else '?'}/100)",
+            subject=f"⏳ Pending: {job.title} @ {job.company} "
+            f"(score {match.score if match else '?'}/100) {self._app_ref(app)}",
             body=(
                 f"Confidence too low to auto-apply.\n\n"
                 f"Job: {job.title}\nCompany: {job.company}\n"
@@ -280,7 +281,7 @@ class Orchestrator:
     def _send_missing_email(self, resume: Resume, app: Application, missing: list[str]) -> None:
         job = app.job
         self.sender.send(
-            subject=f"❓ Need info to apply: {job.title} @ {job.company}",
+            subject=f"❓ Need info to apply: {job.title} @ {job.company} {self._app_ref(app)}",
             body=(
                 "I started the application but don't have some required data:\n"
                 + "\n".join(f"- {m}" for m in missing)
@@ -348,8 +349,8 @@ class Orchestrator:
             old_app = self.store.load(app_id)
         except FileNotFoundError:
             self.sender.send(
-                subject=f"Re-apply failed for {app_id}",
-                body=f"Could not find application {app_id}.",
+                subject="Re-apply failed [app-" + app_id + "]",
+                body="Could not find application " + app_id + ".",
             )
             return
 
